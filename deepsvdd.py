@@ -1,7 +1,9 @@
 import torch
+from torch.optim import lr_scheduler
+
 import wandb
 from torch import nn
-from utils import norm
+from utils import norm, plot
 from numpy import sqrt, quantile
 
 
@@ -28,27 +30,24 @@ class DeepSVDDTrainer:
         self.learning_rate = learning_rate
         self.epochs = epochs
         self.nu = 0.1
+        self.c_size = c_size
         self.c = torch.tensor([0] * c_size, dtype=torch.float32, device=device)
-        self.R = torch.tensor(0, dtype=torch.float32, device=device)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        self.R = torch.tensor(1, dtype=torch.float32, device=device)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-6)
+        #self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=2000, gamma=0.8)
 
     def train(self, training_data):
-        train_loader = torch.utils.data.DataLoader(list(zip(training_data, training_data)), batch_size=1)
-        warmup_epoch = 5
-        losses = []
+        train_loader = torch.utils.data.DataLoader(list(zip(training_data, training_data)), batch_size=50)
 
         for epoch in range(self.epochs):
-            distances = []
+            points = []
             for data in train_loader:
-                dist, loss = self.training_step(data)
-                distances.append(dist)
-            if epoch >= warmup_epoch and epoch % warmup_epoch == 0:
-                self.R = torch.tensor(quantile(sqrt(distances), 1 - self.nu))
-                wandb.log({'radius': self.R})
-            wandb.log({'loss_dsvdd': loss })
-        return losses
+                self.training_step(data, epoch)
+                points.append(data[0])
+            plot(points, self, epoch)
 
-    def training_step(self, data):
+    def training_step(self, data, epoch):
+        warmup_epoch = 10
         inputs, _ = data
         self.optimizer.zero_grad()
         outputs = self.model.forward(norm(inputs))
@@ -57,15 +56,24 @@ class DeepSVDDTrainer:
             loss = torch.mean(dist)
         else:
             scores = dist - self.R ** 2
-            # Use default nu of 0.1 for now
             loss = self.R ** 2 + (1 / self.nu) * torch.mean(torch.max(torch.zeros_like(scores), scores))
         loss.backward()
         self.optimizer.step()
-        return dist.item(), loss.item()
+        wandb.log({'loss_dsvdd': loss.item()})
 
-    def set_center(self, transformed_data):
+        if epoch >= warmup_epoch:
+            #self.R = torch.tensor(quantile(sqrt(dist.clone().data.cpu().numpy()), 1 - self.nu))
+            #wandb.log({'radius': self.R})
+            pass
+
+    def set_center(self, trainins_data):
+        eps = 1
         with torch.no_grad():
-            for x in transformed_data:
+            self.c = torch.zeros(self.c_size, device='cuda')
+            for x in trainins_data:
                 self.c += self.model.forward(torch.nn.functional.normalize(x, p=2, dim=0))
 
-        self.c /= len(transformed_data)
+            self.c /= len(trainins_data)
+            self.c[(abs(self.c) < eps) & (self.c < 0)] = -eps
+            self.c[(abs(self.c) < eps) & (self.c > 0)] = eps
+

@@ -20,9 +20,9 @@ class AETrainer:
         self.device = device
         self.epochs = epochs
         self.learning_rate = learning_rate
-        self.loss_function = nn.MSELoss().to(device) #nn.L1Loss(reduction='sum').to(self.device)
-        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate)
-        #self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=30000, gamma=0.8)
+        self.loss_function = nn.L1Loss(reduction='sum').to(self.device)
+        self.optimizer = torch.optim.SGD(self.model.parameters(), lr=self.learning_rate, weight_decay=1e-6)
+        self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=30000, gamma=0.8)
 
     def train(self, training_data, validation_data):
         train_loader = torch.utils.data.DataLoader(list(zip(training_data, training_data)), batch_size=1, shuffle=True)
@@ -45,7 +45,7 @@ class AETrainer:
         loss = self.loss_function(outputs, targets) * self.loss_function(outputs, targets)
         loss.backward()
         self.optimizer.step()
-        #self.lr_scheduler.step()
+        self.lr_scheduler.step()
         return loss.item()
 
     def validate(self, validation_data):
@@ -55,4 +55,4 @@ class AETrainer:
                 t_data = torch.nn.functional.normalize(data, p=2, dim=0)
                 result = self.model(t_data)
                 losses.append(self.loss_function(t_data, result) * self.loss_function(t_data, result))
-        return sum(losses) / len(validation_data)
+            return sum(losses) / len(validation_data)

@@ -1,9 +1,13 @@
 import csv
+import os
+
 import ripserplusplus as rpp_py
 import numpy as np
 import pickle
 
 import torch
+
+import utils
 import wandb
 from autoencoder import AutoEncoder, AETrainer
 from deepsvdd import DeepSVDD, DeepSVDDTrainer
@@ -16,15 +20,19 @@ import random
 device = 'cuda'
 
 
-def validate_model(dsvdd, c, r, validation_data):
+def validate_model(trainer, validation_data):
     true_positive = 0
     false_positive = 0
     false_negative = 0
     true_negative = 0
 
+    points = []
+
     for (data, label) in validation_data:
-        latent_point = dsvdd.forward(torch.nn.functional.normalize(data, p=2, dim=0))
-        normal = in_sphere(c, r, latent_point)
+        latent_point = trainer.model.forward(torch.nn.functional.normalize(data, p=2, dim=0))
+        if label == "benign":
+            points.append(data)
+        normal = in_sphere(trainer.c, trainer.R, latent_point)
         if normal and label == "benign":
             true_negative += 1
         if normal and label == 'malware':
@@ -34,6 +42,7 @@ def validate_model(dsvdd, c, r, validation_data):
         if not normal and label == 'malware':
             true_positive += 1
 
+    utils.plot(points, trainer, 250)
     print("true positive", true_positive)
     print("false positive", false_positive)
     print("false negative", false_negative)
@@ -107,12 +116,16 @@ def get_trainings_data(values):
 def main():
     scenario_one = []
     scenario_one_all_data = []
+    scenario_validation = []
     scenario_two = []
     with open('scenario1.csv') as csvfile:
         reader = csv.reader(csvfile)
         for row in reader:
             if row[-1] == "benign":
                 scenario_one.append(row[:-1])
+                scenario_validation.append((row[:-1], 'benign'))
+            else:
+                scenario_validation.append((row[:-1], 'malware'))
             scenario_one_all_data.append(row)
 
     with open('scenario2.csv') as csvfile:
@@ -121,7 +134,11 @@ def main():
             scenario_two.append(row)
 
     scenario_one = scenario_one[1:]
-    scenario_one = np.array(list(map(lambda x: list(map(lambda y: float(y), x)), scenario_one)))
+    scenario_validation = scenario_validation[1:]
+    scenario_validation = list(
+        map(lambda x: (torch.tensor(list(map(lambda y: float(y), x[0])), dtype=torch.float32).to(device), x[1]),
+            scenario_validation))
+    scenario_one = list(map(lambda x: list(map(lambda y: float(y), x)), scenario_one))
     # res = prepare(scenario_one, 30)
     # labeled = prepare_labeled(scenario_one_all_data[1:], 30)
     # print(labeled)
@@ -138,9 +155,7 @@ def main():
     trainings_data = []
     validation_data = []
 
-    latent_space_size = 3
-
-
+    latent_space_size = 2
 
     for r in res:
         data = get_trainings_data(r)
@@ -152,33 +167,30 @@ def main():
         if len(data) == 20:
             validation_data.append((torch.tensor(data, dtype=torch.float32).to(device), label))
 
-    list(filter(lambda x: ))
-    return
-
     autoencoder = AutoEncoder(nn.Sequential(
-        nn.Linear(20, 10, bias=False),
-        nn.Sigmoid(),
-        nn.Linear(10, 9, bias=False),
-        nn.Sigmoid(),
-        nn.Linear(9, 8, bias=False),
-        nn.Sigmoid(),
-        nn.Linear(8, latent_space_size, bias=False),
-        nn.Sigmoid(),
-        nn.Linear(latent_space_size, 8, bias=False),
-        nn.Sigmoid(),
-        nn.Linear(8, 9, bias=False),
-        nn.Sigmoid(),
-        nn.Linear(9, 10, bias=False),
-        nn.Sigmoid(),
-        nn.Linear(10, 20, bias=False),
+        nn.Linear(56, 30, bias=False),
+        nn.LeakyReLU(),
+        nn.Linear(30, 15, bias=False),
+        nn.LeakyReLU(),
+        nn.Linear(15, 10, bias=False),
+        nn.LeakyReLU(),
+        nn.Linear(10, latent_space_size, bias=False),
+        nn.LeakyReLU(),
+        nn.Linear(latent_space_size, 10, bias=False),
+        nn.LeakyReLU(),
+        nn.Linear(10, 15, bias=False),
+        nn.LeakyReLU(),
+        nn.Linear(15, 30, bias=False),
+        nn.LeakyReLU(),
+        nn.Linear(30, 56, bias=False),
     ), device)
 
-    learning_rate = 0.01
-    epochs = 150
+    learning_rate = 0.0001
+    epochs = 50
     trainer = AETrainer(autoencoder, device, epochs, learning_rate)
 
-    wandb.login(key="6a208e4a933bae5c70308d10d911239d16d52a13")
-    wandb.init(project="anomaly-topology", config={
+    wandb.login(key="")
+    run = wandb.init(project="anomaly-topology", config={
         "learning_rate": learning_rate,
         "architecture": "DNN",
         "dataset": "scenario-one-only-benign",
@@ -190,29 +202,36 @@ def main():
     t_data = list(filter(lambda x: x[1] == 'benign', validation_data))
 
     wandb.watch(autoencoder)
-    random.shuffle(t_data)
-    training = t_data[:400]  # trainings_data[:704]
-    validation = t_data[400:]
+    random.shuffle(scenario_one)
+    scenario_one = list(map(lambda x: torch.tensor(x, dtype=torch.float32).to(device), scenario_one))
+    training = scenario_one[:600]  # trainings_data[:704]
+    validation = scenario_one[600:]
 
-    training = list(map(lambda x: x[0], training))
-    validation = list(map(lambda x: x[0], validation))
+    # training = list(map(lambda x: x[0], training))
+    # validation = list(map(lambda x: x[0], validation))
 
     trainer.train(training, validation)
 
-    dsvdd = DeepSVDD(nn.Sequential(nn.Linear(20, 10, bias=False),
-                                   nn.Sigmoid(),
-                                   nn.Linear(10, 9, bias=False),
-                                   nn.Sigmoid(),
-                                   nn.Linear(9, 8, bias=False),
-                                   nn.Sigmoid(),
-                                   nn.Linear(8, latent_space_size, bias=False)),
+    os.mkdir("states")
+
+    dsvdd = DeepSVDD(nn.Sequential(nn.Linear(56, 30, bias=False),
+                                   nn.LeakyReLU(),
+                                   nn.Linear(30, 15, bias=False),
+                                   nn.LeakyReLU(),
+                                   nn.Linear(15, 10, bias=False),
+                                   nn.LeakyReLU(),
+                                   nn.Linear(10, latent_space_size, bias=False)),
                      autoencoder,
                      device)
 
-    dsvdd_trainer = DeepSVDDTrainer(dsvdd, 'soft-boundary', latent_space_size, learning_rate, 50, device)
+    dsvdd_trainer = DeepSVDDTrainer(dsvdd, 'soft-boundary', latent_space_size, learning_rate, 250, device)
     dsvdd_trainer.set_center(training)
     dsvdd_trainer.train(training)
-    validate_model(dsvdd, dsvdd_trainer.c, dsvdd_trainer.R, validation_data)
+    validate_model(dsvdd_trainer, scenario_validation)
+
+    artifact = wandb.Artifact('ball-state', type='figures')
+    artifact.add_dir("states")
+    run.log_artifact(artifact)
 
     wandb.finish()
 
