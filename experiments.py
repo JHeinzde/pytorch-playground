@@ -29,7 +29,7 @@ def validate_model(trainer, validation_data):
     points = []
 
     for (data, label) in validation_data:
-        latent_point = trainer.model.forward(torch.nn.functional.normalize(data, p=2, dim=0))
+        latent_point = trainer.model.forward(data)
         if label == "benign":
             points.append(data)
         normal = in_sphere(trainer.c, trainer.R, latent_point)
@@ -42,7 +42,7 @@ def validate_model(trainer, validation_data):
         if not normal and label == 'malware':
             true_positive += 1
 
-    utils.plot(points, trainer, 250)
+    # utils.plot(points, trainer, 250)
     print("true positive", true_positive)
     print("false positive", false_positive)
     print("false negative", false_negative)
@@ -65,30 +65,6 @@ def in_sphere(c, r, vec):
     return np.sum((c.cpu().detach().numpy() - vec.cpu().detach().numpy()) ** 2) < r ** 2
 
 
-def prepare(scenario, window_size):
-    result = []
-    for i in range(0, len(scenario)):
-        result.append(rpp_py.run("--format point-cloud --dim 5", scenario[i:i + window_size]))
-    return result
-
-
-def prepare_labeled(scenario, windows_size):
-    result = []
-    for i in range(0, len(scenario)):
-        label = 'benign'
-        tmp = scenario[i:i + windows_size]
-        new = []
-        for x in tmp:
-            new.append(x[:-1])
-        new = np.array(list(map(lambda x: list(map(lambda y: float(y), x)), new)))
-        for t in tmp:
-            if t[-1] != 'benign':
-                label = 'malware'
-        res = rpp_py.run("--format point-cloud --dim 5", new)
-        result.append((res, label))
-    return result
-
-
 def get_trainings_data(values):
     dimension_two = values[2]
     dimension_one = values[1]
@@ -97,15 +73,18 @@ def get_trainings_data(values):
     feature_vec = []
 
     for x in dimension_two:
+        # print(x[1] - x[0], "dim two")
         feature_vec.append(x[0])
         feature_vec.append(x[1])
 
     for x in dimension_one:
+        # print(x[1] - x[0], "dim one")
         feature_vec.append(x[0])
         feature_vec.append(x[1])
 
     i = -1
     while len(feature_vec) < 20 and -i <= len(dimension_zero):
+        # print(dimension_zero[i][1] - dimension_zero[i][0], "dim zero")
         feature_vec.append(dimension_zero[i][0])
         feature_vec.append(dimension_zero[i][1])
         i -= 1
@@ -113,54 +92,13 @@ def get_trainings_data(values):
     return feature_vec
 
 
-def main():
-    scenario_one = []
-    scenario_one_all_data = []
-    scenario_validation = []
-    scenario_two = []
-    with open('scenario1.csv') as csvfile:
-        reader = csv.reader(csvfile)
-        for row in reader:
-            if row[-1] == "benign":
-                scenario_one.append(row[:-1])
-                scenario_validation.append((row[:-1], 'benign'))
-            else:
-                scenario_validation.append((row[:-1], 'malware'))
-            scenario_one_all_data.append(row)
-
-    with open('scenario2.csv') as csvfile:
-        reader = csv.reader(csvfile)
-        for row in reader:
-            scenario_two.append(row)
-
-    scenario_one = scenario_one[1:]
-    scenario_validation = scenario_validation[1:]
-    scenario_validation = list(
-        map(lambda x: (torch.tensor(list(map(lambda y: float(y), x[0])), dtype=torch.float32).to(device), x[1]),
-            scenario_validation))
-    scenario_one = list(map(lambda x: list(map(lambda y: float(y), x)), scenario_one))
-    # res = prepare(scenario_one, 30)
-    # labeled = prepare_labeled(scenario_one_all_data[1:], 30)
-    # print(labeled)
-    # with open('precomputed_labeled', 'wb+') as f:
-    #   pickle.dump(labeled, f)
-    # with open('precomputed', 'wb+') as f:
-    #    pickle.dump(res, f)
-
-    with open('precomputed', 'rb') as f:
-        res = pickle.load(f)
+def main(latent_space_size, nu, goal, epochs_ae, epoch_dsvdd, lr_ae, lr_dsvdd, batchsize_ae, batchsize_dsvdd,
+         normalize):
     with open('precomputed_labeled', 'rb') as f:
         labeled = pickle.load(f)
 
     trainings_data = []
     validation_data = []
-
-    latent_space_size = 2
-
-    for r in res:
-        data = get_trainings_data(r)
-        if len(data) == 20:
-            trainings_data.append(torch.tensor(data, dtype=torch.float32).to(device))
 
     for (data, label) in labeled:
         data = get_trainings_data(data)
@@ -168,9 +106,7 @@ def main():
             validation_data.append((torch.tensor(data, dtype=torch.float32).to(device), label))
 
     autoencoder = AutoEncoder(nn.Sequential(
-        nn.Linear(56, 30, bias=False),
-        nn.LeakyReLU(),
-        nn.Linear(30, 15, bias=False),
+        nn.Linear(20, 15, bias=False),
         nn.LeakyReLU(),
         nn.Linear(15, 10, bias=False),
         nn.LeakyReLU(),
@@ -180,43 +116,43 @@ def main():
         nn.LeakyReLU(),
         nn.Linear(10, 15, bias=False),
         nn.LeakyReLU(),
-        nn.Linear(15, 30, bias=False),
-        nn.LeakyReLU(),
-        nn.Linear(30, 56, bias=False),
+        nn.Linear(15, 20, bias=False),
     ), device)
 
-    learning_rate = 0.0001
-    epochs = 50
-    trainer = AETrainer(autoencoder, device, epochs, learning_rate)
+    learning_rate_ae = lr_ae
+    learning_rate_dsvdd = lr_dsvdd
+    epochs_autoencoder = epochs_ae
+    epochs_dsvdd = epoch_dsvdd
+    trainer = AETrainer(autoencoder, device, epochs_autoencoder, learning_rate_ae, batchsize_ae)
 
     wandb.login(key="")
     run = wandb.init(project="anomaly-topology", config={
-        "learning_rate": learning_rate,
+        "learning_rate_ae": learning_rate_ae,
         "architecture": "DNN",
         "dataset": "scenario-one-only-benign",
-        "epochs": epochs,
+        "goal": goal,
+        "epochs_ae": epochs_autoencoder,
+        "epochs_dsvdd": epochs_dsvdd,
         "layers_count": len(autoencoder.layers),
-        "latent_space_size": latent_space_size
+        "latent_space_size": latent_space_size,
+        "nu": nu
     })
 
     t_data = list(filter(lambda x: x[1] == 'benign', validation_data))
+    t_data = list(map(lambda x: x[0], t_data))
+
+    if normalize:
+        utils.norm(t_data)
 
     wandb.watch(autoencoder)
-    random.shuffle(scenario_one)
-    scenario_one = list(map(lambda x: torch.tensor(x, dtype=torch.float32).to(device), scenario_one))
-    training = scenario_one[:600]  # trainings_data[:704]
-    validation = scenario_one[600:]
-
-    # training = list(map(lambda x: x[0], training))
-    # validation = list(map(lambda x: x[0], validation))
+    random.shuffle(t_data)
+    print(len(t_data))
+    training = t_data[:400]
+    validation = t_data[400:]
 
     trainer.train(training, validation)
 
-    os.mkdir("states")
-
-    dsvdd = DeepSVDD(nn.Sequential(nn.Linear(56, 30, bias=False),
-                                   nn.LeakyReLU(),
-                                   nn.Linear(30, 15, bias=False),
+    dsvdd = DeepSVDD(nn.Sequential(nn.Linear(20, 15, bias=False),
                                    nn.LeakyReLU(),
                                    nn.Linear(15, 10, bias=False),
                                    nn.LeakyReLU(),
@@ -224,26 +160,31 @@ def main():
                      autoencoder,
                      device)
 
-    dsvdd_trainer = DeepSVDDTrainer(dsvdd, 'soft-boundary', latent_space_size, learning_rate, 250, device)
+    dsvdd_trainer = DeepSVDDTrainer(dsvdd, goal, latent_space_size, learning_rate_dsvdd, nu, epochs_dsvdd,
+                                    batchsize_dsvdd,
+                                    device)
     dsvdd_trainer.set_center(training)
     dsvdd_trainer.train(training)
-    validate_model(dsvdd_trainer, scenario_validation)
+    dists = dsvdd_trainer.model.forward(torch.stack(training)) - dsvdd_trainer.c
+    dists = dists ** 2
+    dsvdd_trainer.R = torch.max(torch.sum(dists, dim=1).sqrt())
+    validate_model(dsvdd_trainer, validation_data)
+    torch.save(dsvdd_trainer.model.state_dict(), './dsvdd-model')
+    torch.save(trainer.model.state_dict(), './ae-model')
 
-    artifact = wandb.Artifact('ball-state', type='figures')
-    artifact.add_dir("states")
+    artifact = wandb.Artifact('ae-model', type='model')
+    artifact.add_file('ae-model')
+    run.log_artifact(artifact)
+    artifact = wandb.Artifact('dsvdd-model', type='model')
+    artifact.add_file('dsvdd-model')
     run.log_artifact(artifact)
 
     wandb.finish()
 
 
 if __name__ == '__main__':
-    # c = np.array([1, 2])
-    # R = 2
-    #
-    # p = np.array([1, 2.5])
-    #
-    # in_sphere = np.sum((c - p) ** 2) < R ** 2
-    #
-    # print(in_sphere)
-
-    main()
+    j = 0.01
+    for i in range(2, 8):
+        while j <= 0.8:
+            main(i, j, 'one-class', 150, 250, 0.001, 0.0001, 50, 75, False)
+            j += 0.05

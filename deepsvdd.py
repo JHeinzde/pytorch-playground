@@ -23,34 +23,36 @@ class DeepSVDD(nn.Module):
 
 # Trainer can train models for either soft-boundary Deep SVDD or One-Class Deep SVDD
 class DeepSVDDTrainer:
-    def __init__(self, model, goal, c_size, learning_rate, epochs, device):
+    def __init__(self, model, goal, c_size, learning_rate, nu, epochs, batch_size, device):
         self.model = model
         self.goal = goal
         self.device = device
         self.learning_rate = learning_rate
         self.epochs = epochs
-        self.nu = 0.1
+        self.nu = nu
+        self.batch_size = batch_size
         self.c_size = c_size
         self.c = torch.tensor([0] * c_size, dtype=torch.float32, device=device)
-        self.R = torch.tensor(1, dtype=torch.float32, device=device)
+        self.R = torch.tensor(0, dtype=torch.float32, device=device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-6)
-        #self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=2000, gamma=0.8)
+        self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.8)
 
     def train(self, training_data):
-        train_loader = torch.utils.data.DataLoader(list(zip(training_data, training_data)), batch_size=50)
+        train_loader = torch.utils.data.DataLoader(list(zip(training_data, training_data)), batch_size=self.batch_size)
 
         for epoch in range(self.epochs):
             points = []
             for data in train_loader:
                 self.training_step(data, epoch)
                 points.append(data[0])
-            plot(points, self, epoch)
+            # plot(points, self, epoch)
+            # plot(list(map(lambda x: x[0], scenario_validation)), self, f"{epoch}-validation")
 
     def training_step(self, data, epoch):
         warmup_epoch = 10
         inputs, _ = data
         self.optimizer.zero_grad()
-        outputs = self.model.forward(norm(inputs))
+        outputs = self.model.forward(inputs)
         dist = torch.sum((outputs - self.c) ** 2, dim=1)
         if self.goal == 'one-class':
             loss = torch.mean(dist)
@@ -61,19 +63,16 @@ class DeepSVDDTrainer:
         self.optimizer.step()
         wandb.log({'loss_dsvdd': loss.item()})
 
-        if epoch >= warmup_epoch:
-            #self.R = torch.tensor(quantile(sqrt(dist.clone().data.cpu().numpy()), 1 - self.nu))
-            #wandb.log({'radius': self.R})
-            pass
+        if epoch >= warmup_epoch and self.goal == "soft-boundary":
+            self.R = torch.tensor(quantile(sqrt(dist.clone().data.cpu().numpy()), 1 - self.nu))
 
-    def set_center(self, trainins_data):
-        eps = 1
+    def set_center(self, training_data):
+        eps = 0.1
         with torch.no_grad():
             self.c = torch.zeros(self.c_size, device='cuda')
-            for x in trainins_data:
+            for x in training_data:
                 self.c += self.model.forward(torch.nn.functional.normalize(x, p=2, dim=0))
 
-            self.c /= len(trainins_data)
-            self.c[(abs(self.c) < eps) & (self.c < 0)] = -eps
-            self.c[(abs(self.c) < eps) & (self.c > 0)] = eps
-
+            self.c /= len(training_data)
+            # self.c[(abs(self.c) < eps) & (self.c < 0)] = -eps
+            # self.c[(abs(self.c) < eps) & (self.c > 0)] = eps
