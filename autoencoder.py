@@ -22,11 +22,11 @@ class AETrainer:
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.batch_size = batch_size
-        self.loss_function = nn.L1Loss(reduction='sum').to(self.device)
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate, weight_decay=1e-6)
-        # self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.8)
+        self.loss_function = nn.L1Loss(reduction='mean').to(self.device)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.1)
 
-    def train(self, training_data, validation_data):
+    def train(self, training_data, validation_data, a_normal):
         train_loader = torch.utils.data.DataLoader(list(zip(training_data, training_data)), batch_size=self.batch_size,
                                                    shuffle=True)
         losses = []
@@ -37,26 +37,26 @@ class AETrainer:
                 epoch_loss.append(loss)
             epoch_loss = sum(epoch_loss) / len(epoch_loss)
             losses.append(epoch_loss)
-            wandb.log({"loss": epoch_loss, "validation_loss": self.validate(validation_data)})
+            wandb.log({"loss": epoch_loss, "validation_loss": self.validate(validation_data),
+                       "anormal_loss": self.validate(a_normal)})
         return losses
 
     def training_step(self, data):
         inputs, targets = data
         self.optimizer.zero_grad()
         outputs = self.model(inputs)
-        targets = targets
-        loss = self.loss_function(outputs, targets) * self.loss_function(outputs, targets)
+        scores = torch.sum((outputs - targets) ** 2,  dim=tuple(range(1, outputs.dim())))  # elf.loss_function(outputs, targets)* self.loss_function(outputs, targets)
+        loss = torch.mean(scores)
         loss.backward()
-        nn.utils.clip_grad_value_(self.model.parameters(), 100)
+        # nn.utils.clip_grad_value_(self.model.parameters(), 100)
         self.optimizer.step()
-        # self.lr_scheduler.step()
-        return loss.item()
+        self.lr_scheduler.step()
+        return loss.item() / len(inputs)
 
     def validate(self, validation_data):
         losses = []
         with torch.no_grad():
             for data in validation_data:
-                # t_data = torch.nn.functional.normalize(data, p=2, dim=0)
                 result = self.model(data)
-                # losses.append(self.loss_function(t_data, result) * self.loss_function(t_data, result))
+                losses.append(self.loss_function(data, result) * self.loss_function(data, result))
             return sum(losses) / len(validation_data)

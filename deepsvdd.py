@@ -35,18 +35,15 @@ class DeepSVDDTrainer:
         self.c = torch.tensor([0] * c_size, dtype=torch.float32, device=device)
         self.R = torch.tensor(0, dtype=torch.float32, device=device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-6)
-        self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.8)
+        self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.1)
 
-    def train(self, training_data):
+    def train(self, training_data, validation_data):
         train_loader = torch.utils.data.DataLoader(list(zip(training_data, training_data)), batch_size=self.batch_size)
 
         for epoch in range(self.epochs):
-            points = []
             for data in train_loader:
                 self.training_step(data, epoch)
-                points.append(data[0])
-            # plot(points, self, epoch)
-            # plot(list(map(lambda x: x[0], scenario_validation)), self, f"{epoch}-validation")
+            plot(validation_data, self, epoch)
 
     def training_step(self, data, epoch):
         warmup_epoch = 10
@@ -61,18 +58,18 @@ class DeepSVDDTrainer:
             loss = self.R ** 2 + (1 / self.nu) * torch.mean(torch.max(torch.zeros_like(scores), scores))
         loss.backward()
         self.optimizer.step()
-        wandb.log({'loss_dsvdd': loss.item()})
+#        wandb.log({'loss_dsvdd': loss.item()})
 
         if epoch >= warmup_epoch and self.goal == "soft-boundary":
             self.R = torch.tensor(quantile(sqrt(dist.clone().data.cpu().numpy()), 1 - self.nu))
 
     def set_center(self, training_data):
-        eps = 0.1
+        #eps = 10
         with torch.no_grad():
             self.c = torch.zeros(self.c_size, device='cuda')
             for x in training_data:
                 self.c += self.model.forward(torch.nn.functional.normalize(x, p=2, dim=0))
 
             self.c /= len(training_data)
-            # self.c[(abs(self.c) < eps) & (self.c < 0)] = -eps
-            # self.c[(abs(self.c) < eps) & (self.c > 0)] = eps
+            #self.c[(abs(self.c) < eps) & (self.c < 0)] = -eps
+            #self.c[(abs(self.c) < eps) & (self.c > 0)] = eps

@@ -10,33 +10,70 @@ def mag(vec):
     return vec.norm(p=2, dim=1, keepdim=True)
 
 
-def plot(points, trainer, epoch):
+def plot(validation_data, trainer, epoch):
     figure, axes = plt.subplots()
     uc_3 = plt.Circle(trainer.c, trainer.R, fill=False)
 
-    new_x = []
-    new_y = []
+    ps_normal = list(filter(lambda x: x[1] == 'benign', validation_data))
+    ps_normal = torch.stack(list(map(lambda x: x[0], ps_normal)))
+    ps_anormal = list(filter(lambda x: x[1] == 'malware', validation_data))
+    ps_anormal = torch.stack(list(map(lambda x: x[0], ps_anormal)))
 
-    for data in points:
-        if len(data) == 50:
-            mapped = trainer.model.forward(norm(data)).cpu().detach().numpy()
-        else:
-            mapped = trainer.model.forward(torch.nn.functional.normalize(data, p=2, dim=0)).cpu().detach().numpy()
+    ps_normal = trainer.model.forward(ps_normal)
+    ps_anormal = trainer.model.forward(ps_anormal)
 
-        if mapped.shape == (50, 2):
-            for m in mapped:
-                new_x.append(m[0])
-                new_y.append(m[1])
-        else:
-            new_x.append(mapped[0])
-            new_y.append(mapped[1])
+    normal_x = []
+    normal_y = []
+    anormal_x = []
+    anormal_y = []
 
-    plt.scatter(new_x, new_y,
-                color="red", s=5)
+    for p in ps_normal.cpu().detach().numpy():
+        normal_x.append(p[0])
+        normal_y.append(p[1])
+
+    for p in ps_anormal.cpu().detach().numpy():
+        anormal_x.append(p[0])
+        anormal_y.append(p[1])
+
+    plt.scatter(anormal_x, anormal_y, color="red", s=5)
+    plt.scatter(normal_x, normal_y,
+                color="green", s=5)
     plt.scatter(trainer.c.cpu().detach().numpy()[0], trainer.c.cpu().detach().numpy()[1],
                 color="black", s=5)
     axes.add_artist(uc_3)
     plt.gca().add_patch(uc_3)
     plt.axis('equal')
     plt.savefig(f'state/state-{epoch}.png')
+    plt.close(figure)
+
+
+def plot_validation(points_normal, points_anormal, trainer):
+    figure, axes = plt.subplots()
+    uc_3 = plt.Circle(trainer.c, trainer.R, fill=False)
+
+    normal_x = []
+    normal_y = []
+    anormal_x = []
+    anormal_y = []
+
+    normal = trainer.model.forward(torch.stack(points_normal))
+    a_normal = trainer.model.forward(torch.stack(points_anormal))
+
+    for p in normal.cpu().detach().numpy():
+        normal_x.append(p[0])
+        normal_y.append(p[1])
+
+    for p in a_normal.cpu().detach().numpy():
+        anormal_x.append(p[0])
+        anormal_y.append(p[1])
+
+    plt.scatter(anormal_x, anormal_y, color="red", s=5)
+    plt.scatter(normal_x, normal_y,
+                color="green", s=5)
+    plt.scatter(trainer.c.cpu().detach().numpy()[0], trainer.c.cpu().detach().numpy()[1],
+                color="black", s=5)
+    axes.add_artist(uc_3)
+    plt.gca().add_patch(uc_3)
+    plt.axis('equal')
+    plt.savefig('state/state-validation-final.png')
     plt.close(figure)

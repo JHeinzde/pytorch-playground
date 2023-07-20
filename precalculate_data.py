@@ -29,7 +29,7 @@ def prepare_labeled(scenario, windows_size):
     return result
 
 
-def pre_calc():
+def pre_calc(window_size):
     scenario_one = []
     scenario_one_all_data = []
     scenario_validation = []
@@ -49,16 +49,15 @@ def pre_calc():
         for row in reader:
             scenario_two.append(row)
 
-    scenario_one = scenario_one[1:]
-    scenario_validation = scenario_validation[1:]
-    scenario_validation = list(
-        map(lambda x: (torch.tensor(list(map(lambda y: float(y), x[0])), dtype=torch.float32).to(device), x[1]),
-            scenario_validation))
-
-    scenario_one = list(map(lambda x: list(map(lambda y: float(y), x)), scenario_one))
-    # res = prepare(scenario_one, 50)
-    labeled = prepare_labeled(scenario_one_all_data[1:], 10)
-    with open('precomputed_labeled-10', 'wb+') as f:
+    labeled = prepare_labeled(scenario_one_all_data[1:], window_size)
+    with open(f'precomputed_labeled-{window_size}', 'wb+') as f:
         pickle.dump(labeled, f)
-    # with open('precomputed-50', 'wb+') as f:
-#   pickle.dump(res, f)
+
+
+def main():
+    for window_size in range(1, 6):
+        pre_calc(window_size)
+
+
+if __name__ == '__main__':
+    main()
