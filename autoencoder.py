@@ -45,8 +45,9 @@ class AETrainer:
         inputs, targets = data
         self.optimizer.zero_grad()
         outputs = self.model(inputs)
-        scores = torch.sum((outputs - targets) ** 2,  dim=tuple(range(1, outputs.dim())))  # elf.loss_function(outputs, targets)* self.loss_function(outputs, targets)
-        loss = torch.mean(scores)
+        loss = self.loss_function(outputs, targets) #* self.loss_function(outputs, targets)
+        #scores = torch.sum((outputs - targets) ** 2,  dim=tuple(range(1, outputs.dim())))  #
+        #loss = torch.mean(scores)
         loss.backward()
         # nn.utils.clip_grad_value_(self.model.parameters(), 100)
         self.optimizer.step()
@@ -58,5 +59,5 @@ class AETrainer:
         with torch.no_grad():
             for data in validation_data:
                 result = self.model(data)
-                losses.append(self.loss_function(data, result) * self.loss_function(data, result))
+                losses.append(self.loss_function(data, result))
             return sum(losses) / len(validation_data)

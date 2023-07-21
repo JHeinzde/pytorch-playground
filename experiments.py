@@ -49,7 +49,7 @@ def validate_model(trainer, validation_data, normalize):
         if not normal and label == 'malware':
             true_positive += 1
 
-    utils.plot_validation(points_normal, points_anormal, trainer)
+    #utils.plot_validation(points_normal, points_anormal, trainer)
     print("true positive", true_positive)
     print("false positive", false_positive)
     print("false negative", false_negative)
@@ -71,7 +71,7 @@ def in_sphere(c, r, vec):
     return np.sum((c.cpu().detach().numpy() - vec.cpu().detach().numpy()) ** 2) < r ** 2
 
 
-def get_trainings_data(values):
+def get_trainings_data(values, input_size):
     dimension_two = values[2]
     dimension_one = values[1]
     dimension_zero = values[0]
@@ -90,8 +90,11 @@ def get_trainings_data(values):
             feature_vec.append(x[0])
             feature_vec.append(x[1])
 
+    if len(feature_vec) > input_size:
+        return feature_vec[:input_size]
+
     i = -1
-    while len(feature_vec) < 20 and -i <= len(dimension_zero):
+    while len(feature_vec) < input_size and -i <= len(dimension_zero):
         # print(dimension_zero[i][1] - dimension_zero[i][0], "dim zero")
         if dimension_zero[i][1] - dimension_zero[i][0] > 70:
             feature_vec.append(dimension_zero[i][0])
@@ -102,7 +105,7 @@ def get_trainings_data(values):
 
 
 def main(latent_space_size, nu, goal, epochs_ae, epoch_dsvdd, lr_ae, lr_dsvdd, batchsize_ae, batchsize_dsvdd,
-         normalize, dataset):
+         normalize, datase, input_size):
     with open(dataset, 'rb') as f:
         labeled = pickle.load(f)
 
@@ -110,13 +113,15 @@ def main(latent_space_size, nu, goal, epochs_ae, epoch_dsvdd, lr_ae, lr_dsvdd, b
     scaler_data = []
 
     for (data, label) in labeled:
-        data = get_trainings_data(data)
-        if len(data) == 20:
+        data = get_trainings_data(data, input_size)
+        if len(data) == input_size:
             scaler_data.append(data)
             validation_data.append((torch.tensor(data, dtype=torch.float32).to(device), label))
 
     scaler = preprocessing.StandardScaler().fit(scaler_data)
     scaler_data = scaler.transform(scaler_data)
+
+    print(len(validation_data))
 
     new_validation_data = []
     for data, (_, label) in zip(scaler_data, validation_data):
@@ -125,9 +130,9 @@ def main(latent_space_size, nu, goal, epochs_ae, epoch_dsvdd, lr_ae, lr_dsvdd, b
     validation_data = new_validation_data
 
     autoencoder = AutoEncoder(nn.Sequential(
-        nn.Linear(20, latent_space_size),
+        nn.Linear(input_size, latent_space_size, bias=False),
         nn.LeakyReLU(),
-        nn.Linear(latent_space_size, 20)
+        nn.Linear(latent_space_size, input_size, bias=False)
     ), device)
 
     shutil.rmtree("state")
@@ -170,7 +175,7 @@ def main(latent_space_size, nu, goal, epochs_ae, epoch_dsvdd, lr_ae, lr_dsvdd, b
     print(scaler.inverse_transform(
         trainer.model.forward(torch.stack(a_normal_data)).cpu().detach().numpy()[0].reshape(1, -1)))
 
-    dsvdd = DeepSVDD(nn.Sequential(nn.Linear(20, latent_space_size)),
+    dsvdd = DeepSVDD(nn.Sequential(nn.Linear(input_size, latent_space_size, bias=False)),
                      autoencoder,
                      device)
 
@@ -206,7 +211,7 @@ if __name__ == '__main__':
 
     # for i in range(100, 1000, 50):
     # torch.manual_seed(42)
-    main(2, 0.1, 'one-class', 50, 200, 0.1, 0.001, 75, 30, False, dataset)
+    main(3, 0.01, 'one-class', 50, 15, 0.1, 0.001, 75, 30, False, dataset, 10)
 
     # j = 0.01
     # for i in range(2, 8):
