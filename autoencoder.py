@@ -22,12 +22,12 @@ class AETrainer:
         self.epochs = epochs
         self.learning_rate = learning_rate
         self.batch_size = batch_size
-        self.loss_function = nn.L1Loss(reduction='mean').to(self.device)
+        self.loss_function = nn.L1Loss(reduction='sum').to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
-        self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.1)
+        # self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=500, gamma=0.9)
 
     def train(self, training_data, validation_data, a_normal):
-        train_loader = torch.utils.data.DataLoader(list(zip(training_data, training_data)), batch_size=self.batch_size,
+        train_loader = torch.utils.data.DataLoader(list(zip(training_data, training_data)), batch_size=1,
                                                    shuffle=True)
         losses = []
         for _ in range(0, self.epochs):
@@ -45,13 +45,13 @@ class AETrainer:
         inputs, targets = data
         self.optimizer.zero_grad()
         outputs = self.model(inputs)
-        loss = self.loss_function(outputs, targets) #* self.loss_function(outputs, targets)
-        #scores = torch.sum((outputs - targets) ** 2,  dim=tuple(range(1, outputs.dim())))  #
-        #loss = torch.mean(scores)
+        loss = self.loss_function(outputs, targets) * self.loss_function(outputs, targets)
+        # scores = torch.sum((outputs - targets) ** 2,  dim=tuple(range(1, outputs.dim())))  #
+        # loss = torch.mean(scores)
         loss.backward()
         # nn.utils.clip_grad_value_(self.model.parameters(), 100)
         self.optimizer.step()
-        self.lr_scheduler.step()
+        # self.lr_scheduler.step()
         return loss.item() / len(inputs)
 
     def validate(self, validation_data):

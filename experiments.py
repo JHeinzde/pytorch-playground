@@ -3,6 +3,7 @@ import os
 import shutil
 import sys
 
+import numpy
 import ripserplusplus as rpp_py
 import numpy as np
 import pickle
@@ -30,31 +31,43 @@ def validate_model(trainer, validation_data, normalize):
     points_normal = []
     points_anormal = []
 
-    for (data, label) in validation_data:
+    labels = []
+    average_anormal_count = []
+    fn_labels = set()
+
+    for (data, label, count) in validation_data:
         if normalize:
             latent_point = trainer.model.forward(torch.nn.functional.normalize(data, p=2, dim=0))
         else:
             latent_point = trainer.model.forward(data)
         if label == "benign":
             points_normal.append(data)
+            labels.append(label)
         else:
             points_anormal.append(data)
+            labels.append(label)
+
         normal = in_sphere(trainer.c, trainer.R, latent_point)
         if normal and label == "benign":
             true_negative += 1
-        if normal and label == 'malware':
+        if normal and label != 'benign':
             false_negative += 1
+            average_anormal_count.append(count)
+            fn_labels.add(label)
         if not normal and label == "benign":
             false_positive += 1
-        if not normal and label == 'malware':
+        if not normal and label != 'benign':
             true_positive += 1
 
-    #utils.plot_validation(points_normal, points_anormal, trainer)
+    utils.plot_validation(points_normal, points_anormal, trainer, labels)
+    average_anormal_count.sort()
     print("true positive", true_positive)
     print("false positive", false_positive)
     print("false negative", false_negative)
     print("true negative", true_negative)
-    print(len(validation_data))
+    print("average anormal count in false negative", sum(average_anormal_count) / len(average_anormal_count))
+    print("median anormal count in false negative", average_anormal_count[len(average_anormal_count) // 2])
+    print("false-negative labels", fn_labels)
 
     print("accuracy", (true_positive + true_negative) / len(validation_data))
     print("f1-score", (2 * true_positive) / (2 * true_positive + false_positive + false_negative))
@@ -80,13 +93,13 @@ def get_trainings_data(values, input_size):
 
     for x in dimension_two:
         # print(x[1] - x[0], "dim two")
-        if x[1] - x[0] > 70:
+        if x[1] - x[0] > 500:
             feature_vec.append(x[0])
             feature_vec.append(x[1])
 
     for x in dimension_one:
         # print(x[1] - x[0], "dim one")
-        if x[1] - x[0] > 70:
+        if x[1] - x[0] > 500:
             feature_vec.append(x[0])
             feature_vec.append(x[1])
 
@@ -96,7 +109,7 @@ def get_trainings_data(values, input_size):
     i = -1
     while len(feature_vec) < input_size and -i <= len(dimension_zero):
         # print(dimension_zero[i][1] - dimension_zero[i][0], "dim zero")
-        if dimension_zero[i][1] - dimension_zero[i][0] > 70:
+        if dimension_zero[i][1] - dimension_zero[i][0] > 500:
             feature_vec.append(dimension_zero[i][0])
             feature_vec.append(dimension_zero[i][1])
             i -= 1
@@ -104,35 +117,52 @@ def get_trainings_data(values, input_size):
     return feature_vec
 
 
+def print_values(training, a_normal, scaler, trainer):
+    for i in range(0, 5):
+        trainer.model.eval()
+        print("normal:", scaler.inverse_transform(training[i].cpu().detach().numpy().reshape(1, -1)))
+        # print(scaler.inverse_transform(a_normal[0].cpu().detach().numpy().reshape(1, -1)))
+        print("normale ae",
+              scaler.inverse_transform(trainer.model.forward(training[i]).cpu().detach().numpy().reshape(1, -1)))
+    # print(scaler.inverse_transform(
+    #    trainer.model.forward(torch.stack(a_normal)).cpu().detach().numpy()[0].reshape(1, -1)))
+
+
 def main(latent_space_size, nu, goal, epochs_ae, epoch_dsvdd, lr_ae, lr_dsvdd, batchsize_ae, batchsize_dsvdd,
-         normalize, datase, input_size):
+         normalize, dataset, input_size):
     with open(dataset, 'rb') as f:
         labeled = pickle.load(f)
 
     validation_data = []
     scaler_data = []
 
-    for (data, label) in labeled:
+    for (data, label, count) in labeled:
         data = get_trainings_data(data, input_size)
         if len(data) == input_size:
             scaler_data.append(data)
-            validation_data.append((torch.tensor(data, dtype=torch.float32).to(device), label))
+            validation_data.append((torch.tensor(data, dtype=torch.float32).to(device), label, count))
 
+    print(len(validation_data))
     scaler = preprocessing.StandardScaler().fit(scaler_data)
     scaler_data = scaler.transform(scaler_data)
 
-    print(len(validation_data))
-
     new_validation_data = []
-    for data, (_, label) in zip(scaler_data, validation_data):
-        new_validation_data.append((torch.tensor(data, dtype=torch.float32).to(device), label))
+    labels = set()
+    for data, (_, label, count) in zip(scaler_data, validation_data):
+        labels.add(label)
+        new_validation_data.append((torch.tensor(data, dtype=torch.float32).to(device), label, count))
 
     validation_data = new_validation_data
 
     autoencoder = AutoEncoder(nn.Sequential(
-        nn.Linear(input_size, latent_space_size, bias=False),
+        nn.Linear(input_size, 10, bias=False),
         nn.LeakyReLU(),
-        nn.Linear(latent_space_size, input_size, bias=False)
+        nn.Linear(10, latent_space_size, bias=False),
+        nn.LeakyReLU(),
+        nn.Linear(latent_space_size, 10, bias=False),
+        nn.Dropout(0.2),
+        nn.LeakyReLU(),
+        nn.Linear(10, input_size, bias=False)
     ), device)
 
     shutil.rmtree("state")
@@ -159,7 +189,7 @@ def main(latent_space_size, nu, goal, epochs_ae, epoch_dsvdd, lr_ae, lr_dsvdd, b
 
     t_data = list(filter(lambda x: x[1] == 'benign', validation_data))
     t_data = list(map(lambda x: x[0], t_data))
-    a_normal_data = list(filter(lambda x: x[1] == 'malware', validation_data))
+    a_normal_data = list(filter(lambda x: x[1] != 'benign', validation_data))
     a_normal_data = list(map(lambda x: x[0], a_normal_data))
 
     wandb.watch(autoencoder)
@@ -168,14 +198,12 @@ def main(latent_space_size, nu, goal, epochs_ae, epoch_dsvdd, lr_ae, lr_dsvdd, b
     validation = t_data[int(len(t_data) * 0.9):]
 
     trainer.train(training, validation, a_normal_data)
+    print_values(training, a_normal_data, scaler, trainer)
 
-    print(scaler.inverse_transform(t_data[0].cpu().detach().numpy().reshape(1, -1)))
-    print(scaler.inverse_transform(a_normal_data[0].cpu().detach().numpy().reshape(1, -1)))
-    print(scaler.inverse_transform(trainer.model.forward(torch.stack(t_data)).cpu().detach().numpy()[0].reshape(1, -1)))
-    print(scaler.inverse_transform(
-        trainer.model.forward(torch.stack(a_normal_data)).cpu().detach().numpy()[0].reshape(1, -1)))
-
-    dsvdd = DeepSVDD(nn.Sequential(nn.Linear(input_size, latent_space_size, bias=False)),
+    dsvdd = DeepSVDD(nn.Sequential(nn.Dropout(),
+                                   nn.Linear(input_size, 10, bias=False),
+                                   nn.LeakyReLU(),
+                                   nn.Linear(10, latent_space_size, bias=False)),
                      autoencoder,
                      device)
 
@@ -211,7 +239,7 @@ if __name__ == '__main__':
 
     # for i in range(100, 1000, 50):
     # torch.manual_seed(42)
-    main(3, 0.01, 'one-class', 50, 15, 0.1, 0.001, 75, 30, False, dataset, 10)
+    main(8, 0.01, 'one-class', 1000, 500, 1e-4, 1e-4, 15, 30, False, dataset, 10)
 
     # j = 0.01
     # for i in range(2, 8):

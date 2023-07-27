@@ -43,7 +43,7 @@ class DeepSVDDTrainer:
         for epoch in range(self.epochs):
             for data in train_loader:
                 self.training_step(data, epoch)
-            plot(validation_data, self, epoch)
+            #plot(validation_data, self, epoch)
 
     def training_step(self, data, epoch):
         warmup_epoch = 10

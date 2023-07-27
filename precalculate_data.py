@@ -18,14 +18,16 @@ def prepare_labeled(scenario, windows_size):
         label = 'benign'
         tmp = scenario[i:i + windows_size]
         new = []
+        a_normal_count = 0
         for x in tmp:
             new.append(x[:-1])
         new = np.array(list(map(lambda x: list(map(lambda y: float(y), x)), new)))
         for t in tmp:
             if t[-1] != 'benign':
-                label = 'malware'
+                label = t[-1]
+                a_normal_count += 1
         res = rpp_py.run("--format point-cloud --dim 3", new)
-        result.append((res, label))
+        result.append((res, label, a_normal_count))
     return result
 
 
@@ -41,7 +43,7 @@ def pre_calc(window_size):
                 scenario_one.append(row[:-1])
                 scenario_validation.append((row[:-1], 'benign'))
             else:
-                scenario_validation.append((row[:-1], 'malware'))
+                scenario_validation.append((row[:-1], row[-1]))
             scenario_one_all_data.append(row)
 
     with open('scenario2.csv') as csvfile:
@@ -55,7 +57,7 @@ def pre_calc(window_size):
 
 
 def main():
-    for window_size in range(1, 6):
+    for window_size in range(10, 60, 10):
         pre_calc(window_size)
 
 
