@@ -58,7 +58,7 @@ class DeepSVDDTrainer:
             loss = self.R ** 2 + (1 / self.nu) * torch.mean(torch.max(torch.zeros_like(scores), scores))
         loss.backward()
         self.optimizer.step()
-#        wandb.log({'loss_dsvdd': loss.item()})
+        wandb.log({'loss_dsvdd': loss.item()})
 
         if epoch >= warmup_epoch and self.goal == "soft-boundary":
             self.R = torch.tensor(quantile(sqrt(dist.clone().data.cpu().numpy()), 1 - self.nu))
@@ -68,7 +68,7 @@ class DeepSVDDTrainer:
         with torch.no_grad():
             self.c = torch.zeros(self.c_size, device='cuda')
             for x in training_data:
-                self.c += self.model.forward(torch.nn.functional.normalize(x, p=2, dim=0))
+                self.c += self.model.forward(x)
 
             self.c /= len(training_data)
             #self.c[(abs(self.c) < eps) & (self.c < 0)] = -eps

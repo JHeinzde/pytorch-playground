@@ -6,14 +6,31 @@ import seaborn as sns
 
 
 def norm(vec):
+    """
+    Normalize a vector with the vector norm
+    :param vec: vector to normalize
+    :return: Vector normalized by vector unit norm
+    """
     return torch.nn.functional.normalize(vec, p=2, dim=1)
 
 
 def mag(vec):
+    """
+    Returns original magnitude of a vector
+    :param vec: Vector we want to calculate the magnitude on
+    :return:
+    """
     return vec.norm(p=2, dim=1, keepdim=True)
 
 
 def plot(validation_data, trainer, epoch):
+    """
+    Plot a Deep SVDD training state
+    :param validation_data: Validation data we want to plot
+    :param trainer: Deep SVDD trainer that the data will be forwarded through
+    :param epoch: The training epoch, used to create a unique filename
+    :return:
+    """
     figure, axes = plt.subplots()
     uc_3 = plt.Circle(trainer.c, trainer.R, fill=False)
 
@@ -51,6 +68,14 @@ def plot(validation_data, trainer, epoch):
 
 
 def plot_validation(points_normal, points_anormal, trainer, labels):
+    """
+    Same function as above but uses malware labels.
+    :param points_normal: Normal points
+    :param points_anormal: Anomalous points
+    :param trainer: Deep SVDD trainer used to forward the points
+    :param labels: Labels of all points
+    :return:
+    """
     figure, axes = plt.subplots()
     uc_3 = plt.Circle(trainer.c, trainer.R, fill=False)
 
@@ -69,3 +94,35 @@ def plot_validation(points_normal, points_anormal, trainer, labels):
     plt.axis('equal')
     plt.savefig('state/state-validation-final.png', bbox_inches='tight')
     plt.close(figure)
+
+
+def plot_hsc(points, labels, name):
+    """
+    Plots the results of an hsc run
+    :param points:
+    :param labels:
+    :param name:
+    :return:
+    """
+    normal_x = []
+    normal_y = []
+
+    anormal_x = []
+    anormal_y = []
+
+    for x, y in zip(points.detach().cpu().numpy(), labels):
+        if y == 1:
+            anormal_x.append(x[0])
+            anormal_y.append(x[1])
+        else:
+            normal_x.append(x[0])
+            normal_y.append(x[1])
+
+    figure, axes = plt.subplots()
+
+    plt.scatter(anormal_x, anormal_y, color='red', s=2)
+    plt.scatter(normal_x, normal_y, color='green', s=2)
+    plt.axis('equal')
+    plt.savefig(f'new/{name}', bbox_inches='tight')
+    plt.close(figure)
+

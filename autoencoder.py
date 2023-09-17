@@ -24,7 +24,7 @@ class AETrainer:
         self.batch_size = batch_size
         self.loss_function = nn.L1Loss(reduction='sum').to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
-        # self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=500, gamma=0.9)
+        self.lr_scheduler = lr_scheduler.StepLR(self.optimizer, step_size=1200, gamma=0.1)
 
     def train(self, training_data, validation_data, a_normal):
         train_loader = torch.utils.data.DataLoader(list(zip(training_data, training_data)), batch_size=1,
@@ -35,6 +35,7 @@ class AETrainer:
             for i, data in enumerate(train_loader, 0):
                 loss = self.training_step(data)
                 epoch_loss.append(loss)
+            self.lr_scheduler.step()
             epoch_loss = sum(epoch_loss) / len(epoch_loss)
             losses.append(epoch_loss)
             wandb.log({"loss": epoch_loss, "validation_loss": self.validate(validation_data),
@@ -51,7 +52,6 @@ class AETrainer:
         loss.backward()
         # nn.utils.clip_grad_value_(self.model.parameters(), 100)
         self.optimizer.step()
-        # self.lr_scheduler.step()
         return loss.item() / len(inputs)
 
     def validate(self, validation_data):
